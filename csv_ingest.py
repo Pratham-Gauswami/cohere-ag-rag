@@ -16,16 +16,23 @@ index = pc.Index(index_name)
 
 # Function to convert a row into a meaningful text block for embedding
 def row_to_text(row):
+    # Helper function to handle empty values
+    def get_value(key, default='unknown'):
+        value = row.get(key, default)
+        return value if value and value.strip() else default
+    
     return (
-        f"A farmer in {row['County']} grows {row['Crop']} on {row['Acreage']} acres "
-        f"with a yield of {row['Yield']}. "
-        f"They use {row['Water source']} as their water source and "
-        f"{row['Power source']} as their power source. "
-        f"The fertilizer amount used is {row['Fertilizer amount']} and "
-        f"{row['Laborers']} laborers are employed. "
-        f"Agricultural advice comes from {row['Main advisory source']} "
-        f"provided by {row['Extension provider']} "
-        f"via {row['Advisory format']} in {row['Advisory language']}."
+        f"Farmer {get_value('Farmer')} in {get_value('County')} county grows {get_value('Crop')} "
+        f"on {get_value('Acreage')} acres with a total yield of {get_value('Yield')} bushels. "
+        f"Education: {get_value('Education')}, Gender: {get_value('Gender')}, "
+        f"Age: {get_value('Age bracket')}, Household size: {get_value('Household size')}. "
+        f"Farm uses {get_value('Fertilizer amount')} units of fertilizer and employs {get_value('Laborers')} laborers. "
+        f"Water source: {get_value('Water source')}, Power source: {get_value('Power source')}. "
+        f"Credit source: {get_value('Main credit source')}, Crop insurance: {get_value('Crop insurance')}, "
+        f"Farm records maintained: {get_value('Farm records')}. "
+        f"Agricultural advice from {get_value('Main advisory source')} "
+        f"provided by {get_value('Extension provider')} "
+        f"via {get_value('Advisory format')} in {get_value('Advisory language')}."
     )
 
 # Read CSV into a list of tuples: (row_index, row_dict)
@@ -59,11 +66,28 @@ for i in range(0, len(rows), batch_size):
             "id": f"row-{r[0]}",
             "values": emb_batch.embeddings.float[j],
             "metadata": {
-                "county": r[1]["County"],
-                "crop": r[1]["Crop"],
-                "yield": r[1]["Yield"],
-                "lat": r[1]["Latitude"],
-                "lon": r[1]["Longitude"]
+                "farmer": r[1].get("Farmer", "Unknown"),
+                "county": r[1].get("County", "Unknown"),
+                "crop": r[1].get("Crop", "Unknown"),
+                "yield": r[1].get("Yield", "0"),
+                "acreage": r[1].get("Acreage", "0"),
+                "education": r[1].get("Education", "Unknown"),
+                "gender": r[1].get("Gender", "Unknown"),
+                "age_bracket": r[1].get("Age bracket", "Unknown"),
+                "household_size": r[1].get("Household size", "0"),
+                "fertilizer_amount": r[1].get("Fertilizer amount", "0"),
+                "laborers": r[1].get("Laborers", "0"),
+                "water_source": r[1].get("Water source", "Unknown"),
+                "power_source": r[1].get("Power source", "Unknown"),
+                "credit_source": r[1].get("Main credit source", "Unknown"),
+                "crop_insurance": r[1].get("Crop insurance", "Unknown"),
+                "farm_records": r[1].get("Farm records", "Unknown"),
+                "advisory_source": r[1].get("Main advisory source", "Unknown"),
+                "extension_provider": r[1].get("Extension provider", "Unknown"),
+                "advisory_format": r[1].get("Advisory format", "Unknown"),
+                "advisory_language": r[1].get("Advisory language", "Unknown"),
+                "latitude": r[1].get("Latitude", "0"),
+                "longitude": r[1].get("Longitude", "0")
             }
         })
 

@@ -419,29 +419,89 @@ if ask_button and query:
         query_embedding = response.embeddings.float[0]
 
         # Step 2: Query Pinecone
+        # Retrieve all available records for comprehensive analysis
         results = index.query(
             vector=query_embedding,
-            top_k=5,
+            top_k=1000,
             include_metadata=True
         )
 
-        # Step 3: Assemble context
+        # Step 3: Assemble context + Smart sorting based on query type
         context_texts = []
-        for match in results['matches']:
+        
+        # Detect query type to determine sorting strategy
+        query_lower = query.lower()
+        yield_keywords = ['yield', 'harvest', 'production', 'bushels', 'most corn', 'highest production']
+        acreage_keywords = ['acreage', 'acres', 'land', 'farm size']
+        fertilizer_keywords = ['fertilizer', 'chemicals', 'inputs']
+        
+        is_yield_query = any(keyword in query_lower for keyword in yield_keywords)
+        is_acreage_query = any(keyword in query_lower for keyword in acreage_keywords)
+        is_fertilizer_query = any(keyword in query_lower for keyword in fertilizer_keywords)
+        
+        # Sort matches based on query type
+        if is_yield_query:
+            sorted_matches = sorted(
+                results['matches'],
+                key=lambda x: float(x['metadata'].get('yield', 0)),
+                reverse=True
+            )
+            sort_type = "yield"
+        elif is_acreage_query:
+            sorted_matches = sorted(
+                results['matches'],
+                key=lambda x: float(x['metadata'].get('acreage', 0)),
+                reverse=True
+            )
+            sort_type = "acreage"
+        elif is_fertilizer_query:
+            sorted_matches = sorted(
+                results['matches'],
+                key=lambda x: float(x['metadata'].get('fertilizer_amount', 0)),
+                reverse=True
+            )
+            sort_type = "fertilizer"
+        else:
+            # Default: sort by semantic relevance score
+            sorted_matches = results['matches']
+            sort_type = "relevance"
+        
+        for match in sorted_matches:
             meta = match['metadata']
-            context_texts.append(f"County: {meta.get('county', '')}, Crop: {meta.get('crop', '')}, Yield: {meta.get('Yield', '')}")
+            context_texts.append(
+                f"Farmer: {meta.get('farmer', 'Unknown')}, "
+                f"County: {meta.get('county', '')}, "
+                f"Crop: {meta.get('crop', '')}, "
+                f"Yield: {meta.get('yield', '')} bushels, "
+                f"Acreage: {meta.get('acreage', '')} acres, "
+                f"Education: {meta.get('education', '')}, "
+                f"Gender: {meta.get('gender', '')}, "
+                f"Age: {meta.get('age_bracket', '')}, "
+                f"Fertilizer: {meta.get('fertilizer_amount', '')}, "
+                f"Laborers: {meta.get('laborers', '')}, "
+                f"Water Source: {meta.get('water_source', '')}, "
+                f"Power Source: {meta.get('power_source', '')}"
+            )
         context_block = "\n".join(context_texts)
 
         # Step 4: Generate answer
-        prompt = f"""
-        Use the following data to answer the question. If the answer is not present, say 'I don't know'.
+        prompt = f"""You are an agricultural data expert. Using the following farmer data, answer the user's question accurately and comprehensively.
 
-        Data:
-        {context_block}
+IMPORTANT INSTRUCTIONS:
+- Always look through ALL the data provided to find complete answers
+- When asked "who has the highest/most X", identify the farmer with the maximum value
+- When asked to list farmers, provide ALL farmer names from the data that match the criteria
+- For aggregation questions (highest, most, best), compare ALL values in the data
+- ALWAYS cite specific farmer names and their values from the data
+- If comparing yields, acreage, fertilizer, or any metric - analyze across all provided records
+- Format farmer names clearly when listing multiple farmers
 
-        Question:
-        {query}
-        """
+Retrieved Farm Data (all relevant records):
+{context_block}
+
+User Question: {query}
+
+Answer:"""
         chat_response = co.chat(
             model="command-a-03-2025",
             message=prompt,
@@ -459,22 +519,50 @@ if ask_button and query:
 
     # ====================== Display Retrieved Context ======================
     st.markdown('<div class="section-header">📄 Retrieved Context</div>', unsafe_allow_html=True)
-    st.markdown("<p style='color: #666; margin-bottom: 1rem;'>These are the top matching records used to generate the answer above.</p>", unsafe_allow_html=True)
     
-    for i, match in enumerate(results['matches'], start=1):
+    # Display sort type to user
+    sort_labels = {
+        "yield": "🌾 Top 5 by Yield",
+        "acreage": "📏 Top 5 by Acreage",
+        "fertilizer": "⚗️ Top 5 by Fertilizer Amount",
+        "relevance": "🎯 Top 5 Most Relevant"
+    }
+    sort_label = sort_labels.get(sort_type, "Top 5 Results")
+    st.markdown(f"<p style='color: #666; margin-bottom: 1rem;'>{sort_label} from {len(sorted_matches)} matching records.</p>", unsafe_allow_html=True)
+    
+    for i, match in enumerate(sorted_matches[:5], start=1):
         meta = match['metadata']
-        with st.expander(f"📍 Context #{i} — Relevance Score: {match['score']:.3f}", expanded=(i==1)):
-            col_a, col_b = st.columns(2)
+        
+        # Create dynamic header based on sort type
+        if sort_type == "yield":
+            header_text = f"📍 #{i} — {meta.get('farmer', 'Unknown')} | Yield: {meta.get('yield', 'N/A')} bushels"
+        elif sort_type == "acreage":
+            header_text = f"📍 #{i} — {meta.get('farmer', 'Unknown')} | Acreage: {meta.get('acreage', 'N/A')} acres"
+        elif sort_type == "fertilizer":
+            header_text = f"📍 #{i} — {meta.get('farmer', 'Unknown')} | Fertilizer: {meta.get('fertilizer_amount', 'N/A')} units"
+        else:
+            header_text = f"📍 Context #{i} — Relevance Score: {match.get('score', 0):.3f}"
+        
+        with st.expander(header_text, expanded=(i==1)):
+            col_a, col_b, col_c = st.columns(3)
             with col_a:
+                st.markdown(f"**Farmer:** {meta.get('farmer', 'N/A')}")
                 st.markdown(f"**County:** {meta.get('county', 'N/A')}")
                 st.markdown(f"**Crop:** {meta.get('crop', 'N/A')}")
-                st.markdown(f"**Yield:** {meta.get('yield', 'N/A')}")
+                st.markdown(f"**Yield:** {meta.get('yield', 'N/A')} bushels")
+                st.markdown(f"**Acreage:** {meta.get('acreage', 'N/A')} acres")
             with col_b:
-                st.markdown(f"**Latitude:** {meta.get('Latitude', 'N/A')}")
-                st.markdown(f"**Longitude:** {meta.get('Longitude', 'N/A')}")
-                other_data = {k:v for k,v in meta.items() if k not in ['County','Crop','Yield','Latitude','Longitude']}
-                if other_data:
-                    st.markdown(f"**Additional Info:** {other_data}")
+                st.markdown(f"**Gender:** {meta.get('gender', 'N/A')}")
+                st.markdown(f"**Age:** {meta.get('age_bracket', 'N/A')}")
+                st.markdown(f"**Education:** {meta.get('education', 'N/A')}")
+                st.markdown(f"**Household Size:** {meta.get('household_size', 'N/A')}")
+                st.markdown(f"**Laborers:** {meta.get('laborers', 'N/A')}")
+            with col_c:
+                st.markdown(f"**Fertilizer:** {meta.get('fertilizer_amount', 'N/A')}")
+                st.markdown(f"**Water Source:** {meta.get('water_source', 'N/A')}")
+                st.markdown(f"**Power Source:** {meta.get('power_source', 'N/A')}")
+                st.markdown(f"**Advisory Source:** {meta.get('advisory_source', 'N/A')}")
+                st.markdown(f"**Crop Insurance:** {meta.get('crop_insurance', 'N/A')}")
 
 # ====================== Farm Map ======================
 st.markdown('<div class="section-header">🗺️ Farm Locations Map</div>', unsafe_allow_html=True)
